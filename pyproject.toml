@@ -1,12 +1,20 @@
 [project]
-name = "process-template"
-version = "0.3.0"
-description = "Add your description here"
+name = "inaktivering-af-cpr-leverandoerer-i-nexus"
+version = "0.1.0"
+description = "Automatisering der inaktiverer leverandører i KMD Nexus baseret på CPR-numre"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "automation-server-client",
+    "kmd-nexus-client",
+    "odk-tools",
+    "datafordeler",
+    "ruff>=0.15.16",
+    "rapidfuzz>=3.14.5",
 ]
 
 [tool.uv.sources]
 automation-server-client = { git = "https://github.com/odense-rpa/automation-server-client.git", tag = "v0.3.0" }
+kmd-nexus-client = { git = "https://github.com/odense-rpa/nexus-client.git" }
+odk-tools = { git = "https://github.com/odense-rpa/odk-tools.git" }
+datafordeler = { git = "https://github.com/odense-rpa/datafordeler.git" }
