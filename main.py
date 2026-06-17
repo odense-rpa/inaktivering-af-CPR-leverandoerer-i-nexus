@@ -2,7 +2,6 @@ import argparse
 import asyncio
 import logging
 import os
-import re
 
 from automation_server_client import (
     AutomationServer,
@@ -22,6 +21,7 @@ nexus: NexusClientManager | None = None
 datafordeler: DatafordelerClient | None = None
 tracker: Tracker | None = None
 proces_navn = "Inaktivering af CPR-leverandører i Nexus"
+
 
 def beregn_levenshtein(nexus_adresse: str, datafordeler_adresse: str) -> float:
     """Beregn Levenshtein-afstand som procentdel af Nexus-navnets længde.
@@ -47,11 +47,15 @@ async def populate_queue(workqueue: Workqueue):
     aktive_leverandører = [
         leverandør
         for leverandør in alle_leverandører
-        if (leverandør.get("cvrNumber") == "" or leverandør.get("cvrNumber") is None) and leverandør.get("active") and leverandør.get("type") == "external"
+        if (leverandør.get("cvrNumber") == "" or leverandør.get("cvrNumber") is None)
+        and leverandør.get("active")
+        and leverandør.get("type") == "external"
     ]
 
     for leverandør in aktive_leverandører:
-        self_leverandør = nexus.nexus_client.get(leverandør["_links"]["self"]["href"]).json()
+        self_leverandør = nexus.nexus_client.get(
+            leverandør["_links"]["self"]["href"]
+        ).json()
         if self_leverandør["cprNumber"] is None or self_leverandør["cprNumber"] == "":
             continue
         data = {
@@ -60,7 +64,9 @@ async def populate_queue(workqueue: Workqueue):
             "navn": leverandør["name"],
             "adresse": self_leverandør.get("address", {}).get("addressLine1", ""),
             "postnummer": self_leverandør.get("address", {}).get("postalCode", ""),
-            "postdistrikt": self_leverandør.get("address", {}).get("postalDistrict", ""),
+            "postdistrikt": self_leverandør.get("address", {}).get(
+                "postalDistrict", ""
+            ),
         }
         workqueue.add_item(data=data, reference=data["CPR"])
 
@@ -74,7 +80,9 @@ async def process_workqueue(workqueue: Workqueue):
 
             try:
                 borger_status = datafordeler.hent_personoplysninger(data["CPR"])
-                if borger_status["Person"]["status"] != "bopael_i_danmark": # svarer til status "01" i Service platform format
+                if (
+                    borger_status["Person"]["status"] != "bopael_i_danmark"
+                ):  # svarer til status "01" i Service platform format
                     leverandør = nexus.nexus_client.get(
                         f"https://odensekommune.nexus.kmd.dk:443/api/core/mobile/odensekommune/v2/suppliers/{data['id']}"
                     ).json()
@@ -85,62 +93,95 @@ async def process_workqueue(workqueue: Workqueue):
                     nexus.organisationer.opdater_leverandør(leverandør)
                     tracker.track_task(process_name=proces_navn)
                     continue
-                borgers_navne = next((
-                    navn for navn in borger_status["Person"]["Navne"] if navn["Navn"]["status"] == "aktuel"
-                ), None)
+
+                borgers_navne = next(
+                    (
+                        navn
+                        for navn in borger_status["Person"]["Navne"]
+                        if navn["Navn"]["status"] == "aktuel"
+                    ),
+                    None,
+                )
                 if not borgers_navne:
                     report(
                         report_id="inaktivering_af_cpr_leverandoerer_i_nexus",
                         group="Manuel",
                         json={
                             "CPR": data["CPR"],
-                            "Årsag" : "Datafordeler kan ikke finde et 'aktuelt' navn - så vi kan ikke være sikre"
-                        }
+                            "Årsag": "Datafordeler kan ikke finde et 'aktuelt' navn - så vi kan ikke være sikre",
+                        },
                     )
                     continue
 
                 # Finder borgers navn fra datafordeleren
-                adresseringsnavn = borgers_navne["Navn"]["adresseringsnavn"]
-                efternavn_match = re.search(r"^[^,]+", adresseringsnavn)
-                fornavn_match = re.search(r"(?<=,).*", adresseringsnavn)
-                efternavn = efternavn_match.group(0) if efternavn_match else ""
-                fornavn_mellemnavn = fornavn_match.group(0).strip() if fornavn_match else ""
-                kombineret_navn = f"{fornavn_mellemnavn} {efternavn}"
-                
+                efternavn = borgers_navne["Navn"]["efternavn"]
+                fornavn = borgers_navne["Navn"]["fornavne"]
+                mellemnavn = borgers_navne["Navn"].get("mellemnavn", "")
+                navn_dele = (
+                    [fornavn, mellemnavn, efternavn]
+                    if mellemnavn
+                    else [fornavn, efternavn]
+                )
+                kombineret_navn = " ".join(navn_dele)
+
                 if data["navn"] != kombineret_navn:
                     report(
                         report_id="inaktivering_af_cpr_leverandoerer_i_nexus",
                         group="Manuel",
                         json={
                             "CPR": data["CPR"],
-                            "Årsag" : "Navnet i Nexus matcher ikke navnet i Datafordeleren - så vi kan ikke være sikre",
+                            "Årsag": "Navnet i Nexus matcher ikke navnet i Datafordeleren - så vi kan ikke være sikre",
                             "Nexus_navn": data["navn"],
                             "Datafordeler_navn": kombineret_navn,
-                        }
+                        },
                     )
                     continue
 
-                borgers_datafordeler_adresse = datafordeler.hent_aktiv_adresse(data["CPR"])
-                borgers_datafordeler_adresse_formateret = datafordeler.formater_adresse(borgers_datafordeler_adresse["Adresseoplysninger"])
-                borgers_nexus_adresse = data["adresse"] + ", " + data["postnummer"] + " " + data["postdistrikt"]
+                borgers_datafordeler_adresse = datafordeler.hent_aktiv_adresse(
+                    data["CPR"]
+                )
+                borgers_datafordeler_adresse_formateret = datafordeler.formater_adresse(
+                    borgers_datafordeler_adresse["Adresseoplysninger"]
+                )
+                borgers_nexus_adresse = (
+                    data["adresse"]
+                    + ", "
+                    + data["postnummer"]
+                    + " "
+                    + data["postdistrikt"]
+                )
                 if borgers_datafordeler_adresse_formateret == borgers_nexus_adresse:
                     continue
                 else:
-                    levenshtein_procent = beregn_levenshtein(borgers_nexus_adresse, borgers_datafordeler_adresse_formateret)
+                    levenshtein_procent = beregn_levenshtein(
+                        borgers_nexus_adresse, borgers_datafordeler_adresse_formateret
+                    )
                     # Hvis Levenshtein-afstanden er 10% eller mindre, antager vi at det er en stavefejl og fortsætter uden manuel gennemgang
-                    if levenshtein_procent <= 10: 
+                    if levenshtein_procent <= 10:
                         continue
                     report(
                         report_id="inaktivering_af_cpr_leverandoerer_i_nexus",
                         group="Manuel",
                         json={
                             "CPR": data["CPR"],
-                            "Årsag" : "Adressen i Nexus matcher ikke adressen i Datafordeleren - så vi kan ikke være sikre",
+                            "Årsag": "Adressen i Nexus matcher ikke adressen i Datafordeleren - så vi kan ikke være sikre",
                             "Nexus_adresse": borgers_nexus_adresse,
                             "Datafordeler_adresse": borgers_datafordeler_adresse_formateret,
-                        }
+                        },
                     )
                     continue
+            except ValueError as e:
+                logger.warning(
+                    f"Borger med CPR {data['CPR']} blev ikke fundet i Datafordeleren: {e}"
+                )
+                report(
+                    report_id="inaktivering_af_cpr_leverandoerer_i_nexus",
+                    group="Manuel",
+                    json={
+                        "CPR": data["CPR"],
+                        "Årsag": "Borger ikke fundet i Datafordeleren - så vi kan ikke være sikre",
+                    },
+                )
             except Exception as e:
                 logger.error(f"Fejl ved behandling af element: {data}. Fejl: {e}")
                 item.fail(str(e))
