@@ -108,6 +108,7 @@ async def process_workqueue(workqueue: Workqueue):
                         group="Manuel",
                         json={
                             "CPR": data["CPR"],
+                            "Leverandør navn": data["navn"],
                             "Årsag": "Datafordeler kan ikke finde et 'aktuelt' navn - så vi kan ikke være sikre",
                         },
                     )
@@ -130,8 +131,8 @@ async def process_workqueue(workqueue: Workqueue):
                         group="Manuel",
                         json={
                             "CPR": data["CPR"],
-                            "Årsag": "Navnet i Nexus matcher ikke navnet i Datafordeleren - så vi kan ikke være sikre",
-                            "Nexus_navn": data["navn"],
+                            "Leverandør navn": data["navn"],
+                            "Årsag": "Navnet i Nexus matcher ikke navnet i Datafordeleren - så vi kan ikke være sikre",                            
                             "Datafordeler_navn": kombineret_navn,
                         },
                     )
@@ -164,6 +165,7 @@ async def process_workqueue(workqueue: Workqueue):
                         group="Manuel",
                         json={
                             "CPR": data["CPR"],
+                            "Leverandør navn": data["navn"],
                             "Årsag": "Adressen i Nexus matcher ikke adressen i Datafordeleren - så vi kan ikke være sikre",
                             "Nexus_adresse": borgers_nexus_adresse,
                             "Datafordeler_adresse": borgers_datafordeler_adresse_formateret,
@@ -179,6 +181,7 @@ async def process_workqueue(workqueue: Workqueue):
                     group="Manuel",
                     json={
                         "CPR": data["CPR"],
+                        "Leverandør navn": data["navn"],
                         "Årsag": "Borger ikke fundet i Datafordeleren - så vi kan ikke være sikre",
                     },
                 )
