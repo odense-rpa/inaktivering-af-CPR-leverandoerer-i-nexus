@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import logging
-import os
 
 from automation_server_client import (
     AutomationServer,
@@ -10,7 +9,7 @@ from automation_server_client import (
     WorkItemStatus,
 )
 from kmd_nexus_client import NexusClientManager
-from datafordeler import Datafordeler as DatafordelerClient
+from datafordeler import DatafordelerGraphQL
 from odk_tools.tracking import Tracker
 from odk_tools.reporting import report
 from rapidfuzz.distance import Levenshtein
@@ -18,7 +17,7 @@ from rapidfuzz.distance import Levenshtein
 
 logger = logging.getLogger(__name__)
 nexus: NexusClientManager | None = None
-datafordeler: DatafordelerClient | None = None
+datafordeler: DatafordelerGraphQL | None = None
 tracker: Tracker | None = None
 proces_navn = "Inaktivering af CPR-leverandører i Nexus"
 
@@ -79,10 +78,8 @@ async def process_workqueue(workqueue: Workqueue):
             data = item.data
 
             try:
-                borger_status = datafordeler.hent_personoplysninger(data["CPR"])
-                if (
-                    borger_status["Person"]["status"] != "bopael_i_danmark"
-                ):  # svarer til status "01" i Service platform format
+                person = datafordeler.hent_person(data["CPR"])
+                if not person.bor_i_danmark:  # svarer til status "01" i Service platform format
                     leverandør = nexus.nexus_client.get(
                         f"https://odensekommune.nexus.kmd.dk:443/api/core/mobile/odensekommune/v2/suppliers/{data['id']}"
                     ).json()
@@ -94,15 +91,7 @@ async def process_workqueue(workqueue: Workqueue):
                     tracker.track_task(process_name=proces_navn)
                     continue
 
-                borgers_navne = next(
-                    (
-                        navn
-                        for navn in borger_status["Person"]["Navne"]
-                        if navn["Navn"]["status"] == "aktuel"
-                    ),
-                    None,
-                )
-                if not borgers_navne:
+                if person.navn is None:
                     report(
                         report_id="inaktivering_af_cpr_leverandoerer_i_nexus",
                         group="Manuel",
@@ -115,15 +104,7 @@ async def process_workqueue(workqueue: Workqueue):
                     continue
 
                 # Finder borgers navn fra datafordeleren
-                efternavn = borgers_navne["Navn"]["efternavn"]
-                fornavn = borgers_navne["Navn"]["fornavne"]
-                mellemnavn = borgers_navne["Navn"].get("mellemnavn", "")
-                navn_dele = (
-                    [fornavn, mellemnavn, efternavn]
-                    if mellemnavn
-                    else [fornavn, efternavn]
-                )
-                kombineret_navn = " ".join(navn_dele)
+                kombineret_navn = person.navn.fuldt_navn
 
                 if data["navn"] != kombineret_navn:
                     report(
@@ -138,12 +119,10 @@ async def process_workqueue(workqueue: Workqueue):
                     )
                     continue
 
-                borgers_datafordeler_adresse = datafordeler.hent_aktiv_adresse(
-                    data["CPR"]
-                )
-                borgers_datafordeler_adresse_formateret = datafordeler.formater_adresse(
-                    borgers_datafordeler_adresse["Adresseoplysninger"]
-                )
+                if person.adresse is None:
+                    # Samme udfald som REST-klientens hent_aktiv_adresse: "ikke fundet"
+                    raise ValueError("Ingen aktiv adresse fundet")
+                borgers_datafordeler_adresse_formateret = person.adresse.formateret()
                 borgers_nexus_adresse = (
                     data["adresse"]
                     + ", "
@@ -199,6 +178,7 @@ async def main():
 
     tracking_credential = Credential.get_credential("Odense SQL Server")
     nexus_credential = Credential.get_credential("KMD Nexus - produktion")
+    datafordeler_credential = Credential.get_credential("Datafordeler")
 
     tracker = Tracker(
         username=tracking_credential.username, password=tracking_credential.password
@@ -211,10 +191,9 @@ async def main():
         timeout=60,
     )
 
-    certifikat_sti = os.getenv("CERTIFIKATER", "/certifikater")
-    datafordeler = DatafordelerClient(
-        certifikat_sti=os.path.join(certifikat_sti, "datafordeler.crt"),
-        certifikat_nøglefil=os.path.join(certifikat_sti, "datafordeler.key"),
+    datafordeler = DatafordelerGraphQL(
+        client_id=datafordeler_credential.username,
+        client_secret=datafordeler_credential.password,
     )
 
     parser = argparse.ArgumentParser(description=proces_navn)
