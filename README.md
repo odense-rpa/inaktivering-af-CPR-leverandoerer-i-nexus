@@ -16,7 +16,7 @@ Automatisering der validerer aktive leverandører i KMD Nexus med CPR-numre og i
 - [`uv`](https://docs.astral.sh/uv/) til pakkehåndtering
 - Adgang til **Automation Server** (arbejdskø)
 - Adgang til **KMD Nexus** (produktion)
-- Adgang til **Datafordeleren** med gyldigt klientcertifikat
+- Adgang til **Datafordeleren** via credential `Datafordeler` i Automation Server
 - En **Odense SQL Server**-konto til tracking
 
 ## Konfiguration
@@ -25,7 +25,6 @@ Kopiér `.env.example` til `.env` og udfyld følgende:
 
 | Variabel | Beskrivelse |
 | -------- | ----------- |
-| `CERTIFIKATER` | Sti til mappe med `datafordeler.crt` og `datafordeler.key` |
 | _(Automation Server-variabler)_ | Ifølge `automation-server-client`-dokumentationen |
 
 ## Brug
